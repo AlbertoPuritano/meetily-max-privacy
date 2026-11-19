@@ -65,47 +65,51 @@ struct OllamaApiModel {
     size: i64,
 }
 
-// Helper function to check if endpoint is localhost
-fn is_localhost_endpoint(endpoint: Option<&str>) -> bool {
-    match endpoint {
-        None | Some("") => true,
-        Some(url) => {
-            url.contains("localhost") ||
-            url.contains("127.0.0.1") ||
-            url.contains("::1")
-        }
-    }
-}
+pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://localhost:11434";
 
-// Helper function to validate endpoint URL format
-fn validate_endpoint_url(url: &str) -> Result<(), OllamaError> {
-    if url.is_empty() {
-        return Ok(()); // Empty is valid (uses default)
-    }
+/// Resolves the Ollama base URL. Only loopback hosts are accepted so that
+/// meeting content is never sent to another machine.
+pub fn ollama_base_url(endpoint: Option<&str>) -> Result<String, String> {
+    let raw = endpoint
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_OLLAMA_ENDPOINT);
 
-    // Check if URL starts with http:// or https://
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    let url = url::Url::parse(raw).map_err(|_| {
+        OllamaError::InvalidEndpoint("expected a URL like http://localhost:11434".to_string())
+            .to_string()
+    })?;
+    if !matches!(url.scheme(), "http" | "https") {
         return Err(OllamaError::InvalidEndpoint(
-            "URL must start with http:// or https://".to_string()
-        ));
+            "URL must start with http:// or https://".to_string(),
+        )
+        .to_string());
     }
 
-    Ok(())
+    let is_loopback = match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    if !is_loopback {
+        return Err(OllamaError::InvalidEndpoint(
+            "Ollama must run on this computer (localhost, 127.0.0.1 or ::1)".to_string(),
+        )
+        .to_string());
+    }
+
+    Ok(raw.trim_end_matches('/').to_string())
 }
 
 #[command]
 pub async fn get_ollama_models(endpoint: Option<String>) -> Result<Vec<OllamaModel>, String> {
-    // Validate endpoint format if provided
-    if let Some(ref ep) = endpoint {
-        if let Err(e) = validate_endpoint_url(ep) {
-            return Err(e.to_string());
-        }
-    }
+    let base_url = ollama_base_url(endpoint.as_deref())?;
 
     // Add timeout wrapper (5 seconds max)
     match timeout(
         Duration::from_secs(5),
-        get_models_via_http_with_retry(endpoint.as_deref())
+        get_models_via_http_with_retry(&base_url)
     ).await {
         Ok(Ok(models)) => {
             if models.is_empty() {
@@ -115,28 +119,23 @@ pub async fn get_ollama_models(endpoint: Option<String>) -> Result<Vec<OllamaMod
             }
         }
         Ok(Err(http_err)) => {
-            // Only fallback to CLI if endpoint is localhost/empty
-            if is_localhost_endpoint(endpoint.as_deref()) {
-                get_models_via_cli().map_err(|cli_err| {
-                    format!("{}\n\nAlso tried CLI: {}", http_err, cli_err)
-                })
-            } else {
-                Err(http_err)
-            }
+            get_models_via_cli().map_err(|cli_err| {
+                format!("{}\n\nAlso tried CLI: {}", http_err, cli_err)
+            })
         }
         Err(_) => Err(OllamaError::Timeout.to_string()),
     }
 }
 
 // HTTP request with retry logic and exponential backoff
-async fn get_models_via_http_with_retry(endpoint: Option<&str>) -> Result<Vec<OllamaModel>, String> {
+async fn get_models_via_http_with_retry(base_url: &str) -> Result<Vec<OllamaModel>, String> {
     const MAX_RETRIES: u32 = 2;
     const INITIAL_BACKOFF_MS: u64 = 300;
 
     let mut last_error = String::new();
 
     for attempt in 0..=MAX_RETRIES {
-        match get_models_via_http_async(endpoint).await {
+        match get_models_via_http_async(base_url).await {
             Ok(models) => return Ok(models),
             Err(e) => {
                 last_error = e.clone();
@@ -158,9 +157,8 @@ async fn get_models_via_http_with_retry(endpoint: Option<&str>) -> Result<Vec<Ol
     Err(format!("Failed after {} retries: {}", MAX_RETRIES, last_error))
 }
 
-async fn get_models_via_http_async(endpoint: Option<&str>) -> Result<Vec<OllamaModel>, String> {
+async fn get_models_via_http_async(base_url: &str) -> Result<Vec<OllamaModel>, String> {
     let client = Client::new();
-    let base_url = endpoint.unwrap_or("http://localhost:11434");
     let url = format!("{}/api/tags", base_url);
 
     let response = client
@@ -262,6 +260,8 @@ pub async fn pull_ollama_model<R: Runtime>(
     model_name: String,
     endpoint: Option<String>,
 ) -> Result<(), String> {
+    let base_url = ollama_base_url(endpoint.as_deref())?;
+
     // Check if model is already being downloaded
     {
         let downloading = DOWNLOADING_MODELS.read().await;
@@ -279,7 +279,6 @@ pub async fn pull_ollama_model<R: Runtime>(
     }
 
     let client = Client::new();
-    let base_url = endpoint.as_deref().unwrap_or("http://localhost:11434");
     let url = format!("{}/api/pull", base_url);
 
     let payload = serde_json::json!({
@@ -437,8 +436,8 @@ pub async fn delete_ollama_model(
     model_name: String,
     endpoint: Option<String>,
 ) -> Result<(), String> {
+    let base_url = ollama_base_url(endpoint.as_deref())?;
     let client = Client::new();
-    let base_url = endpoint.as_deref().unwrap_or("http://localhost:11434");
     let url = format!("{}/api/delete", base_url);
 
     let payload = serde_json::json!({
@@ -509,6 +508,47 @@ pub async fn get_ollama_model_context(
             );
             // Return default instead of error for better UX
             Ok(4000)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_url_defaults_to_localhost() {
+        assert_eq!(ollama_base_url(None).unwrap(), DEFAULT_OLLAMA_ENDPOINT);
+        assert_eq!(ollama_base_url(Some("  ")).unwrap(), DEFAULT_OLLAMA_ENDPOINT);
+    }
+
+    #[test]
+    fn base_url_accepts_loopback_hosts() {
+        for raw in [
+            "http://localhost:11434/",
+            "http://LOCALHOST:8080",
+            "http://127.0.0.1:11434",
+            "http://127.1.2.3:11434",
+            "http://[::1]:11434",
+        ] {
+            let resolved = ollama_base_url(Some(raw)).unwrap();
+            assert!(!resolved.ends_with('/'), "{raw} -> {resolved}");
+        }
+    }
+
+    #[test]
+    fn base_url_rejects_remote_and_malformed_hosts() {
+        for raw in [
+            "https://api.ollama.ai",
+            "http://192.168.1.10:11434",
+            "http://10.0.0.1:11434",
+            "http://localhost.example.com:11434",
+            "http://example.com/localhost",
+            "ftp://localhost:11434",
+            "localhost:11434",
+            "not a url",
+        ] {
+            assert!(ollama_base_url(Some(raw)).is_err(), "accepted {raw}");
         }
     }
 }

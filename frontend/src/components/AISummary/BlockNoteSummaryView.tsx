@@ -266,6 +266,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
               }
             }}
             theme="light"
+            emojiPicker={false}
           />
         </div>
       </div>

@@ -364,17 +364,12 @@ pub(crate) async fn generate_meeting_summary(
     client: &Client,
     provider: &LLMProvider,
     model_name: &str,
-    api_key: &str,
     text: &str,
     custom_prompt: &str,
     template_id: &str,
     template: &Template,
     token_threshold: usize,
     ollama_endpoint: Option<&str>,
-    custom_openai_endpoint: Option<&str>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     summary_language: Option<&str>,
@@ -396,9 +391,7 @@ pub(crate) async fn generate_meeting_summary(
             let successful_chunk_count;
             let mut stage_reasoning_stripped = false;
 
-            if (provider == &LLMProvider::Ollama || provider == &LLMProvider::BuiltInAI)
-                && total_tokens >= token_threshold
-            {
+            if total_tokens >= token_threshold {
                 let chunks = chunk_text(text, token_threshold - 300, 100);
                 let num_chunks = chunks.len();
                 let mut chunk_summaries = Vec::with_capacity(num_chunks);
@@ -409,9 +402,8 @@ pub(crate) async fn generate_meeting_summary(
                     let prompt = build_chunk_summary_user_prompt(chunk);
                     for attempt in 1..=MAX_CHUNK_ATTEMPTS {
                         let result = match generate_summary(
-                            client, provider, model_name, api_key, "You are an expert meeting summarizer.",
-                            &prompt, ollama_endpoint, custom_openai_endpoint, max_tokens, temperature,
-                            top_p, app_data_dir, cancellation_token,
+                            client, provider, model_name, "You are an expert meeting summarizer.",
+                            &prompt, ollama_endpoint, app_data_dir, cancellation_token,
                         )
                         .await
                         {
@@ -471,10 +463,9 @@ pub(crate) async fn generate_meeting_summary(
                 } else {
                     let prompt = build_combine_summary_user_prompt(&chunk_summaries.join("\n---\n"));
                     let completion = generate_summary(
-                        client, provider, model_name, api_key,
+                        client, provider, model_name,
                         "You are an expert at synthesizing meeting summaries.", &prompt,
-                        ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p,
-                        app_data_dir, cancellation_token,
+                        ollama_endpoint, app_data_dir, cancellation_token,
                     )
                     .await?;
                     let cleaned = clean_llm_markdown_detailed(&completion.content);
@@ -500,9 +491,8 @@ pub(crate) async fn generate_meeting_summary(
                 final_user_prompt.push_str("\n</user_context>");
             }
             let completion = generate_summary(
-                client, provider, model_name, api_key, &final_system_prompt, &final_user_prompt,
-                ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p,
-                app_data_dir, cancellation_token,
+                client, provider, model_name, &final_system_prompt, &final_user_prompt,
+                ollama_endpoint, app_data_dir, cancellation_token,
             )
             .await?;
             let cleaned = clean_llm_markdown_detailed(&completion.content);
@@ -515,9 +505,8 @@ pub(crate) async fn generate_meeting_summary(
         match resolve_final_language_action(summary_language, detected_transcript_language) {
             FinalLanguageAction::Translate(language) => {
                 let translated = translate_markdown(
-                    client, provider, model_name, api_key, &english_markdown, language,
-                    ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p,
-                    app_data_dir, cancellation_token,
+                    client, provider, model_name, &english_markdown, language,
+                    ollama_endpoint, app_data_dir, cancellation_token,
                 )
                 .await
                 .map_err(|error| format!("Translation to {language} failed: {error}"))?;
@@ -528,9 +517,8 @@ pub(crate) async fn generate_meeting_summary(
                 let (normalized, fallback) = english_markdown_after_normalization_result(
                     &english_markdown,
                     normalize_markdown_to_english(
-                        client, provider, model_name, api_key, &english_markdown, ollama_endpoint,
-                        custom_openai_endpoint, max_tokens, temperature, top_p, app_data_dir,
-                        cancellation_token,
+                        client, provider, model_name, &english_markdown, ollama_endpoint,
+                        app_data_dir, cancellation_token,
                     )
                     .await,
                     cancellation_token,
@@ -556,15 +544,10 @@ async fn run_markdown_transform(
     client: &Client,
     provider: &LLMProvider,
     model_name: &str,
-    api_key: &str,
     system_prompt: &str,
     user_prompt: &str,
     failure_label: &str,
     ollama_endpoint: Option<&str>,
-    custom_openai_endpoint: Option<&str>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<CleanedLlmMarkdown, String> {
@@ -572,8 +555,8 @@ async fn run_markdown_transform(
         return Err("Summary generation was cancelled".to_string());
     }
     let completion = generate_summary(
-        client, provider, model_name, api_key, system_prompt, user_prompt, ollama_endpoint,
-        custom_openai_endpoint, max_tokens, temperature, top_p, app_data_dir, cancellation_token,
+        client, provider, model_name, system_prompt, user_prompt, ollama_endpoint,
+        app_data_dir, cancellation_token,
     )
     .await
     .map_err(|error| format!("{failure_label} failed: {error}"))?;
@@ -587,14 +570,9 @@ async fn translate_markdown(
     client: &Client,
     provider: &LLMProvider,
     model_name: &str,
-    api_key: &str,
     english_markdown: &str,
     target_language: &str,
     ollama_endpoint: Option<&str>,
-    custom_openai_endpoint: Option<&str>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<CleanedLlmMarkdown, String> {
@@ -603,9 +581,8 @@ async fn translate_markdown(
         "Translate the following Markdown document into {target_language}. Return ONLY the translated Markdown, nothing else.\n\n<document>\n{english_markdown}\n</document>"
     );
     let cleaned = run_markdown_transform(
-        client, provider, model_name, api_key, &system_prompt, &user_prompt, "Translation pass",
-        ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p, app_data_dir,
-        cancellation_token,
+        client, provider, model_name, &system_prompt, &user_prompt, "Translation pass",
+        ollama_endpoint, app_data_dir, cancellation_token,
     )
     .await?;
     require_visible_markdown("Translation", &cleaned)?;
@@ -617,13 +594,8 @@ async fn normalize_markdown_to_english(
     client: &Client,
     provider: &LLMProvider,
     model_name: &str,
-    api_key: &str,
     markdown: &str,
     ollama_endpoint: Option<&str>,
-    custom_openai_endpoint: Option<&str>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<CleanedLlmMarkdown, String> {
@@ -631,9 +603,8 @@ async fn normalize_markdown_to_english(
         "Convert the following Markdown document into English. Return ONLY the English Markdown, nothing else.\n\n<document>\n{markdown}\n</document>"
     );
     run_markdown_transform(
-        client, provider, model_name, api_key, english_normalization_system_prompt(), &user_prompt,
-        "English normalization pass", ollama_endpoint, custom_openai_endpoint, max_tokens,
-        temperature, top_p, app_data_dir, cancellation_token,
+        client, provider, model_name, english_normalization_system_prompt(), &user_prompt,
+        "English normalization pass", ollama_endpoint, app_data_dir, cancellation_token,
     )
     .await
 }

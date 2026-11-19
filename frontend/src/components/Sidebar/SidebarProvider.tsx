@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import type { SummaryProcessResponse } from '@/types';
@@ -40,8 +39,6 @@ interface SidebarContextType {
   setCurrentMeeting: (meeting: CurrentMeeting | null) => void;
   sidebarItems: SidebarItem[];
   isCollapsed: boolean;
-  doodlePath: string | null;
-  doodleDate: string | null;
   toggleCollapse: () => void;
   meetings: CurrentMeeting[];
   setMeetings: (meetings: CurrentMeeting[]) => void;
@@ -51,10 +48,6 @@ interface SidebarContextType {
   searchTranscripts: (query: string) => Promise<void>;
   searchResults: TranscriptSearchResult[];
   isSearching: boolean;
-  setServerAddress: (address: string) => void;
-  serverAddress: string;
-  transcriptServerAddress: string;
-  setTranscriptServerAddress: (address: string) => void;
   // Summary polling management
   startSummaryPolling: (
     meetingId: string,
@@ -80,15 +73,11 @@ export const useSidebar = () => {
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const [doodlePath, setDoodlePath] = useState<string | null>(null);
-  const [doodleDate, setDoodleDate] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [serverAddress, setServerAddress] = useState('');
-  const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
   const summaryPollsRef = React.useRef(new Map<string, SummaryPoll>());
 
   // Use recording state from RecordingStateContext (single source of truth)
@@ -97,49 +86,24 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  useEffect(() => {
-    const sync = () => {
-      invoke<string | null>('doodle_sync').then(path => {
-        setDoodlePath(path);
-        setDoodleDate(new Date().toISOString().slice(0, 10));
-      }).catch(() => setDoodlePath(null));
-    };
-    const onVisibility = () => { if (document.visibilityState === 'visible') sync(); };
-    sync();
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, []);
-
   // Extract fetchMeetings as a reusable function
   const fetchMeetings = React.useCallback(async () => {
-    if (serverAddress) {
-      try {
-        const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
-          id: meeting.id,
-          title: meeting.title
-        }));
-        setMeetings(transformedMeetings);
-        Analytics.trackBackendConnection(true);
-      } catch (error) {
-        console.error('Error fetching meetings:', error);
-        setMeetings([]);
-        Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
-      }
+    try {
+      const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
+      const transformedMeetings = meetings.map((meeting: any) => ({
+        id: meeting.id,
+        title: meeting.title
+      }));
+      setMeetings(transformedMeetings);
+    } catch (error) {
+      console.error('Error fetching meetings:', error);
+      setMeetings([]);
     }
-  }, [serverAddress]);
+  }, []);
 
   useEffect(() => {
     fetchMeetings();
-  }, [serverAddress, fetchMeetings]);
-
-  useEffect(() => {
-    const fetchSettings = async () => {
-      setServerAddress('http://localhost:5167');
-      setTranscriptServerAddress('http://127.0.0.1:8178/stream');
-    };
-    fetchSettings();
-  }, []);
+  }, [fetchMeetings]);
 
   const baseItems: SidebarItem[] = [
     {
@@ -184,9 +148,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         sessionStorage.setItem('autoStartRecording', 'true');
         router.push('/');
       }
-
-      // Track recording initiation from sidebar
-      Analytics.trackButtonClick('start_recording', 'sidebar');
     }
     // The actual recording start/stop is handled in the Home component
   };
@@ -317,8 +278,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setCurrentMeeting,
       sidebarItems,
       isCollapsed,
-      doodlePath,
-      doodleDate,
       toggleCollapse,
       meetings,
       setMeetings,
@@ -328,10 +287,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       searchTranscripts,
       searchResults,
       isSearching,
-      setServerAddress,
-      serverAddress,
-      transcriptServerAddress,
-      setTranscriptServerAddress,
       startSummaryPolling,
       stopSummaryPolling,
       refetchMeetings: fetchMeetings,

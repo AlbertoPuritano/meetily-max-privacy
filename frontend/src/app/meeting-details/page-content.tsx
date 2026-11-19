@@ -2,8 +2,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { MeetingSummary, SummaryProcessResponse } from '@/types';
-import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
@@ -67,9 +65,6 @@ export default function PageContent({
   const manuallySelectedTabMeetingIdsRef = useRef(new Set<string>());
   const autoGenerationStartedMeetingIdRef = useRef<string | null>(null);
 
-  // Sidebar context
-  const { serverAddress } = useSidebar();
-
   // Get model config from ConfigContext
   const { modelConfig, setModelConfig, isModelConfigLoading } = useConfig();
 
@@ -101,7 +96,6 @@ export default function PageContent({
         provider: config.provider,
         model: config.model,
         whisperModel: config.whisperModel,
-        apiKey: config.apiKey ?? null,
         ollamaEndpoint: config.ollamaEndpoint ?? null,
       });
 
@@ -140,11 +134,6 @@ export default function PageContent({
   const meetingOperations = useMeetingOperations({
     meeting,
   });
-
-  // Track page view
-  useEffect(() => {
-    Analytics.trackPageView('meeting_details');
-  }, []);
 
   useEffect(() => {
     if (

@@ -46,7 +46,7 @@ export default function BasicBlockNoteTest() {
       <div className="view-wrapper">
         <div className="view-label">Editor Output</div>
         <div className="view">
-          <BlockNoteView editor={editor} editable={true} />
+          <BlockNoteView editor={editor} editable={true} emojiPicker={false} />
         </div>
       </div>
     </div>

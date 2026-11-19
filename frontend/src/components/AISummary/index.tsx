@@ -612,7 +612,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         <h3 className="text-red-700 font-medium">Error Generating Summary</h3>
       </div>
       <p className="text-red-600 text-sm">{error}</p>
-      <p className="text-red-500 text-xs mt-2">Please check your model configuration and API keys, or try again.</p>
+      <p className="text-red-500 text-xs mt-2">Please check your model configuration, or try again.</p>
     </div>
   );
 

@@ -5,7 +5,6 @@ import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
-import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 
@@ -78,15 +77,6 @@ interface ConfigContextType {
   isAutoSummary: boolean;
   toggleIsAutoSummary: (checked: boolean) => void;
 
-  // Provider-specific API keys
-  providerApiKeys: {
-    claude: string | null;
-    groq: string | null;
-    openai: string | null;
-    openrouter: string | null;
-  };
-  updateProviderApiKey: (provider: string, apiKey: string | null) => void;
-
   // Preference settings (lazy loaded)
   notificationSettings: NotificationSettings | null;
   storageLocations: StorageLocations | null;
@@ -113,21 +103,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: 'parakeet',
     model: 'parakeet-tdt-0.6b-v3-int8',
-    apiKey: null
-  });
-
-  // Provider-specific API keys (loaded once at startup)
-  // Note: Gemini omitted for now - add when UI support is added
-  const [providerApiKeys, setProviderApiKeys] = useState<{
-    claude: string | null;
-    groq: string | null;
-    openai: string | null;
-    openrouter: string | null;
-  }>({
-    claude: null,
-    groq: null,
-    openai: null,
-    openrouter: null,
   });
 
   // Ollama models list and error state
@@ -205,7 +180,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           setTranscriptModelConfig({
             provider: config.provider || 'parakeet',
             model: config.model || 'parakeet-tdt-0.6b-v3-int8',
-            apiKey: config.apiKey || null
           });
         }
       } catch (error) {
@@ -234,45 +208,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       try {
         const data = await configService.getModelConfig();
         if (data && data.provider) {
-          // If provider is custom-openai, fetch the additional config
-          if (data.provider === 'custom-openai') {
-            try {
-              const customConfig = await configService.getCustomOpenAIConfig();
-              if (customConfig) {
-                // Merge custom config fields into modelConfig
-                console.log('[ConfigContext] Loading custom OpenAI config:', {
-                  endpoint: customConfig.endpoint,
-                  model: customConfig.model,
-                });
-                const resolvedModel = customConfig.model || data.model || '';
-                setModelConfig(prev => ({
-                  ...prev,
-                  provider: data.provider,
-                  model: resolvedModel || prev.model,
-                  whisperModel: data.whisperModel || prev.whisperModel,
-                  customOpenAIEndpoint: customConfig.endpoint,
-                  customOpenAIModel: customConfig.model,
-                  customOpenAIApiKey: customConfig.apiKey,
-                  maxTokens: customConfig.maxTokens,
-                  temperature: customConfig.temperature,
-                  topP: customConfig.topP,
-                }));
-
-                // Seed per-provider model cache from DB
-                if (resolvedModel) {
-                  const map = JSON.parse(localStorage.getItem('providerModelMap') || '{}');
-                  map[data.provider] = resolvedModel;
-                  localStorage.setItem('providerModelMap', JSON.stringify(map));
-                }
-
-                return; // Early return
-              }
-            } catch (err) {
-              console.error('[ConfigContext] Failed to fetch custom OpenAI config:', err);
-            }
-          }
-
-          // For non-custom-openai providers, just set base config
           setModelConfig(prev => ({
             ...prev,
             provider: data.provider,
@@ -297,33 +232,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     fetchModelConfig();
   }, []);
 
-  // Load all provider API keys on mount
-  useEffect(() => {
-    const loadAllApiKeys = async () => {
-      try {
-        const providers = ['claude', 'groq', 'openai', 'openrouter'];
-        const keys = await Promise.all(
-          providers.map(p =>
-            invoke<string>('api_get_api_key', { provider: p })
-              .catch(() => null) // Gracefully handle missing keys
-          )
-        );
-
-        setProviderApiKeys({
-          claude: keys[0],
-          groq: keys[1],
-          openai: keys[2],
-          openrouter: keys[3],
-        });
-        console.log('[ConfigContext] Loaded provider API keys');
-      } catch (error) {
-        console.error('[ConfigContext] Failed to load provider API keys:', error);
-      }
-    };
-
-    loadAllApiKeys();
-  }, []);
-
   // Listen for model config updates from other components
   useEffect(() => {
     const setupListener = async () => {
@@ -331,11 +239,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
         console.log('[ConfigContext] Received model-config-updated event:', event.payload);
         setModelConfig(event.payload);
-
-        // Update provider-specific key when config changes
-        if (event.payload.apiKey && event.payload.provider !== 'custom-openai') {
-          updateProviderApiKey(event.payload.provider, event.payload.apiKey);
-        }
       });
       return unlisten;
     };
@@ -371,12 +274,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Calculate model options based on available models
   const modelOptions: Record<ModelConfig['provider'], string[]> = {
     ollama: models.map(model => model.name),
-    claude: ['claude-3-5-sonnet-latest'],
-    groq: ['llama-3.3-70b-versatile'],
-    openrouter: [],
-    openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     'builtin-ai': [],
-    'custom-openai': [],
   };
 
   // Toggle confidence indicator with localStorage persistence
@@ -396,25 +294,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Toggle beta feature with localStorage persistence and analytics
+  // Toggle beta feature with localStorage persistence
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
     setBetaFeatures(prev => {
       const updated = { ...prev, [featureKey]: enabled };
       saveBetaFeatures(updated);
-
-      // Track analytics with specific feature
-      Analytics.track('beta_feature_toggled', {
-        feature: featureKey,
-        enabled: enabled.toString(),
-      }).catch(err => console.error('Failed to track beta feature toggle:', err));
-
       return updated;
     });
-  }, []);
-
-  // Update individual provider API key
-  const updateProviderApiKey = useCallback((provider: string, apiKey: string | null) => {
-    setProviderApiKeys(prev => ({ ...prev, [provider]: apiKey }));
   }, []);
 
   // Lazy load preference settings (only loads if not already cached)
@@ -495,8 +381,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     isModelConfigLoading,
     isAutoSummary,
     toggleIsAutoSummary,
-    providerApiKeys,
-    updateProviderApiKey,
     transcriptModelConfig,
     setTranscriptModelConfig,
     selectedDevices,
@@ -520,8 +404,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     isModelConfigLoading,
     isAutoSummary,
     toggleIsAutoSummary,
-    providerApiKeys,
-    updateProviderApiKey,
     transcriptModelConfig,
     selectedDevices,
     selectedLanguage,

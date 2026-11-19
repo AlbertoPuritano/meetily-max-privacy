@@ -17,7 +17,6 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
-    apiKey: null,
     ollamaEndpoint: null
   });
 
@@ -28,36 +27,6 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     try {
       const data = await invoke('api_get_model_config') as any;
       if (data && data.provider !== null) {
-        // Fetch API key if not included and provider requires it
-        if (data.provider !== 'ollama' && data.provider !== 'builtin-ai' && !data.apiKey) {
-          try {
-            const apiKeyData = await invoke('api_get_api_key', {
-              provider: data.provider
-            }) as string;
-            data.apiKey = apiKeyData;
-          } catch (err) {
-            console.error('Failed to fetch API key:', err);
-          }
-        }
-        // Fetch Custom OpenAI config if that's the active provider
-        if (data.provider === 'custom-openai') {
-          try {
-            const customConfig = (await invoke('api_get_custom_openai_config')) as any;
-            if (customConfig) {
-              data.customOpenAIDisplayName = customConfig.displayName || null;
-              data.customOpenAIEndpoint = customConfig.endpoint || null;
-              data.customOpenAIModel = customConfig.model || null;
-              data.customOpenAIApiKey = customConfig.apiKey || null;
-              data.maxTokens = customConfig.maxTokens || null;
-              data.temperature = customConfig.temperature || null;
-              data.topP = customConfig.topP || null;
-              // For custom-openai, model field should match customOpenAIModel
-              data.model = customConfig.model || data.model;
-            }
-          } catch (err) {
-            console.error('Failed to fetch custom OpenAI config:', err);
-          }
-        }
         setModelConfig(data);
       }
     } catch (error) {
@@ -105,7 +74,6 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         provider: config.provider,
         model: config.model,
         whisperModel: config.whisperModel,
-        apiKey: config.apiKey,
         ollamaEndpoint: config.ollamaEndpoint,
       });
 

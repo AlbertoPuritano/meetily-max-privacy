@@ -47,5 +47,6 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
     };
   }, [editor, onChange]);
 
-  return <BlockNoteView editor={editor} editable={editable} theme="light" />;
+  // The emoji picker downloads its data from a CDN, so it stays disabled.
+  return <BlockNoteView editor={editor} editable={editable} theme="light" emojiPicker={false} />;
 }

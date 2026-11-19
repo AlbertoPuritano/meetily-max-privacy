@@ -9,7 +9,6 @@ import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
-import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -27,7 +26,6 @@ import { VisuallyHidden } from "@/components/ui/visually-hidden"
 
 import { MessageToast } from '../MessageToast';
 import Logo from '../Logo';
-import FeedbackLink from '../FeedbackLink';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
@@ -47,8 +45,6 @@ const Sidebar: React.FC = () => {
     setCurrentMeeting,
     sidebarItems,
     isCollapsed,
-    doodlePath,
-    doodleDate,
     toggleCollapse,
     handleRecordingToggle,
     searchTranscripts,
@@ -56,7 +52,6 @@ const Sidebar: React.FC = () => {
     isSearching,
     meetings,
     setMeetings,
-    serverAddress
   } = useSidebar();
 
   // Get recording state from RecordingStateContext (single source of truth)
@@ -70,7 +65,6 @@ const Sidebar: React.FC = () => {
     provider: 'ollama',
     model: '',
     whisperModel: '',
-    apiKey: null,
     ollamaEndpoint: null
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
@@ -110,26 +104,9 @@ const Sidebar: React.FC = () => {
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
     const fetchModelConfig = async () => {
-      // Only make API call if serverAddress is loaded
-      if (!serverAddress) {
-        console.log('Waiting for server address to load before fetching model config');
-        return;
-      }
-
       try {
         const data = await invoke('api_get_model_config') as any;
         if (data && data.provider !== null) {
-          // Fetch API key if not included and provider requires it
-          if (data.provider !== 'ollama' && !data.apiKey) {
-            try {
-              const apiKeyData = await invoke('api_get_api_key', {
-                provider: data.provider
-              }) as string;
-              data.apiKey = apiKeyData;
-            } catch (err) {
-              console.error('Failed to fetch API key:', err);
-            }
-          }
           setModelConfig(data);
         }
       } catch (error) {
@@ -138,18 +115,12 @@ const Sidebar: React.FC = () => {
     };
 
     fetchModelConfig();
-  }, [serverAddress]);
+  }, []);
 
 
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
     const fetchTranscriptSettings = async () => {
-      // Only make API call if serverAddress is loaded
-      if (!serverAddress) {
-        console.log('Waiting for server address to load before fetching transcript settings');
-        return;
-      }
-
       try {
         const data = await invoke('api_get_transcript_config') as any;
         if (data && data.provider !== null) {
@@ -160,7 +131,7 @@ const Sidebar: React.FC = () => {
       }
     };
     fetchTranscriptSettings();
-  }, [serverAddress]);
+  }, []);
 
   // Listen for model config updates from other components
   useEffect(() => {
@@ -191,7 +162,6 @@ const Sidebar: React.FC = () => {
         provider: config.provider,
         model: config.model,
         whisperModel: config.whisperModel,
-        apiKey: config.apiKey,
         ollamaEndpoint: config.ollamaEndpoint,
       });
 
@@ -202,9 +172,6 @@ const Sidebar: React.FC = () => {
       // Emit event to sync other components
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
-
-      // Track settings change
-      await Analytics.trackSettingsChanged('model_config', `${config.provider}_${config.model}`);
     } catch (error) {
       console.error('Error saving model config:', error);
       setSettingsSaveSuccess(false);
@@ -217,22 +184,16 @@ const Sidebar: React.FC = () => {
       const payload = {
         provider: configToSave.provider,
         model: configToSave.model,
-        apiKey: configToSave.apiKey ?? null
       };
       console.log('Saving transcript config with payload:', payload);
 
       await invoke('api_save_transcript_config', {
         provider: payload.provider,
         model: payload.model,
-        apiKey: payload.apiKey,
       });
 
 
       setSettingsSaveSuccess(true);
-
-      // Track settings change
-      const transcriptConfigToSave = updatedConfig || transcriptModelConfig;
-      await Analytics.trackSettingsChanged('transcript_config', `${transcriptConfigToSave.provider}_${transcriptConfigToSave.model}`);
     } catch (error) {
       console.error('Failed to save transcript config:', error);
       setSettingsSaveSuccess(false);
@@ -335,9 +296,6 @@ const Sidebar: React.FC = () => {
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
       setMeetings(updatedMeetings);
 
-      // Track meeting deletion
-      Analytics.trackMeetingDeleted(itemId);
-
       // Show success toast
       toast.success("Meeting deleted successfully", {
         description: "All associated data has been removed"
@@ -402,9 +360,6 @@ const Sidebar: React.FC = () => {
         setCurrentMeeting({ id: meetingId, title: newTitle });
       }
 
-      // Track the edit
-      Analytics.trackButtonClick('edit_meeting_title', 'sidebar');
-
       toast.success("Meeting title updated successfully");
 
       // Close modal and reset state
@@ -456,7 +411,7 @@ const Sidebar: React.FC = () => {
     return (
       <TooltipProvider>
         <div className="flex flex-col items-center space-y-4 mt-4">
-          <Logo isCollapsed={isCollapsed} doodlePath={doodlePath} doodleDate={doodleDate} />
+          <Logo isCollapsed={isCollapsed} />
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -529,7 +484,7 @@ const Sidebar: React.FC = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => pathname === '/feedback' ? router.replace('/settings') : router.push('/settings')}
+                onClick={() => router.push('/settings')}
                 className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
                   }`}
               >
@@ -540,8 +495,6 @@ const Sidebar: React.FC = () => {
               <p>Settings</p>
             </TooltipContent>
           </Tooltip>
-
-          <FeedbackLink isCollapsed={isCollapsed} />
         </div>
       </TooltipProvider>
     );
@@ -805,13 +758,12 @@ const Sidebar: React.FC = () => {
             )}
 
             <button
-              onClick={() => pathname === '/feedback' ? router.replace('/settings') : router.push('/settings')}
+              onClick={() => router.push('/settings')}
               className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
             >
               <Settings className="w-4 h-4 mr-2" />
               <span>Settings</span>
             </button>
-            <FeedbackLink isCollapsed={isCollapsed} />
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
               v0.5.0
             </div>

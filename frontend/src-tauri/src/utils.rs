@@ -61,50 +61,24 @@ pub(crate) fn log_snippet(value: &str, max_chars: usize) -> String {
     snippet.finish()
 }
 
-pub(crate) fn url_origin_for_log(raw: &str) -> String {
-    let Ok(url) = url::Url::parse(raw) else {
-        return "<invalid-url>".to_string();
-    };
-    let Some(host) = url.host_str() else {
-        return "<invalid-url>".to_string();
-    };
-
-    match url.port() {
-        Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
-        None => format!("{}://{}", url.scheme(), host),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{bounded_log_line, log_snippet, url_origin_for_log, MAX_LOG_RECORD_CHARS};
+    use super::{bounded_log_line, log_snippet, MAX_LOG_RECORD_CHARS};
 
     #[test]
-    fn logging_helpers_bound_content_and_strip_url_secrets() {
+    fn logging_helpers_bound_content() {
         assert_eq!(log_snippet("short", 10), "short");
         assert_eq!(log_snippet("résumé", 3), "rés…");
         assert_eq!(log_snippet("a\r\nb\u{7f}", 5), "a  b ");
         assert_eq!(log_snippet("nonempty", 0), "…");
-        assert_eq!(
-            url_origin_for_log("https://user:secret@example.com:8443/path?token=secret#fragment"),
-            "https://example.com:8443"
-        );
-        assert_eq!(url_origin_for_log("mailto:person@example.com"), "<invalid-url>");
         assert_eq!(bounded_log_line(format_args!("a\r\nb")), "a  b");
 
-        let endpoint = "https://user:ENDPOINT_SECRET@example.com/path?token=QUERY_SECRET";
         let line = bounded_log_line(format_args!(
-            "endpoint_origin={}, response_bytes={}, meeting_name_configured={}",
-            url_origin_for_log(endpoint),
+            "response_bytes={}, meeting_name_configured={}",
             "REMOTE_BODY_SECRET".len(),
             Some("MEETING_TITLE_SECRET").is_some()
         ));
-        for marker in [
-            "ENDPOINT_SECRET",
-            "QUERY_SECRET",
-            "REMOTE_BODY_SECRET",
-            "MEETING_TITLE_SECRET",
-        ] {
+        for marker in ["REMOTE_BODY_SECRET", "MEETING_TITLE_SECRET"] {
             assert!(!line.contains(marker));
         }
 

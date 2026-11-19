@@ -73,8 +73,8 @@ export function SetupOverviewStep() {
                                 </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-sm">
-                                You can also select external AI providers like OpenAI, Claude, or
-                                Ollama for summary generation in settings.
+                                You can also use an Ollama server running on this computer for
+                                summary generation in settings.
                                 </TooltipContent>
                             </Tooltip>
                             </TooltipProvider>
@@ -96,16 +96,6 @@ export function SetupOverviewStep() {
           >
             Let's Go
           </Button>
-          <div className="text-center">
-            <a
-              href="https://github.com/Zackriya-Solutions/meeting-minutes"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-gray-600 hover:underline"
-            >
-              Report issues on GitHub
-            </a>
-          </div>
         </div>
       </div>
     </OnboardingContainer>
